@@ -1,0 +1,252 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  CLIENT
+  PENTESTER
+}
+
+enum TargetType {
+  WEB_APP
+  API
+  CLOUD
+  HOST
+}
+
+enum TargetStatus {
+  ACTIVE
+  PENDING
+  INACTIVE
+}
+
+enum PentestStatus {
+  IN_PROGRESS
+  REPORTED
+  RESCAN
+  COMPLETED
+  CANCELLED
+}
+
+enum PentestType {
+  MANUAL
+  AUTOMATED
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum FindingStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum NotificationType {
+  NEW_FINDING
+  STATUS_UPDATE
+  REPORT_READY
+}
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  CLOSED
+}
+
+model User {
+  id               String    @id @default(cuid())
+  fullName         String
+  email            String    @unique
+  password         String
+  role             Role      @default(CLIENT)
+  companyId        String?
+  company          Company?  @relation(fields: [companyId], references: [id])
+  avatar           String?
+  isActive         Boolean   @default(true)
+  
+  // Relations
+  createdPentests     Pentest[]      @relation("CreatedBy")
+  assignedPentests    Pentest[]      @relation("AssignedPentesters")
+  clientPentests      Pentest[]      @relation("ClientPentests")
+  reportedFindings    Finding[]      @relation("ReportedBy")
+  assignedFindings    Finding[]      @relation("AssignedTo")
+  ownedTargets        Target[]       @relation("TargetOwner")
+  assignedTargets     Target[]       @relation("AssignedPentesters")
+  notifications       Notification[]
+  auditLogs           AuditLog[]
+  createdReports      Report[]
+  createdTickets      Ticket[]       @relation("TicketCreatedBy")
+  assignedTickets     Ticket[]       @relation("TicketAssignedTo")
+  
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+}
+
+model Company {
+  id        String   @id @default(cuid())
+  name      String
+  industry  String?
+  logo      String?
+  
+  users     User[]
+  targets   Target[]
+  pentests  Pentest[]
+  findings  Finding[]
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Target {
+  id                  String         @id @default(cuid())
+  name                String
+  type                TargetType
+  companyId           String
+  company             Company        @relation(fields: [companyId], references: [id])
+  ownerId             String?
+  owner               User?          @relation("TargetOwner", fields: [ownerId], references: [id])
+  status              TargetStatus   @default(PENDING)
+  verificationState   String?
+  lastScanned         DateTime?
+  riskScore           Float          @default(0)
+  
+  pentests            Pentest[]
+  findings            Finding[]
+  assignedPentesters  User[]         @relation("AssignedPentesters")
+  
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+}
+
+model Pentest {
+  id                   String         @id @default(cuid())
+  title                String
+  description          String?
+  status               PentestStatus  @default(IN_PROGRESS)
+  progress             Float          @default(0)
+  companyId            String
+  company              Company        @relation(fields: [companyId], references: [id])
+  targetId             String
+  target               Target         @relation(fields: [targetId], references: [id])
+  clientId             String?
+  client               User?          @relation("ClientPentests", fields: [clientId], references: [id])
+  type                 PentestType    @default(MANUAL)
+  startDate            DateTime
+  endDate              DateTime?
+  totalVulnerabilities Int            @default(0)
+  critical             Int            @default(0)
+  high                 Int            @default(0)
+  medium               Int            @default(0)
+  low                  Int            @default(0)
+  rescan               Boolean        @default(false)
+  createdById          String
+  createdBy            User           @relation("CreatedBy", fields: [createdById], references: [id])
+  
+  assignedPentesters   User[]         @relation("AssignedPentesters")
+  findings             Finding[]
+  reports              Report[]
+  notifications        Notification[]
+  tickets              Ticket[]
+  
+  createdDate          DateTime       @default(now())
+  updatedDate          DateTime       @updatedAt
+}
+
+model Finding {
+  id              String         @id @default(cuid())
+  title           String
+  description     String
+  severity        Severity
+  cvssScore       Float?
+  category        String?
+  status          FindingStatus  @default(OPEN)
+  reportedById    String
+  reportedBy      User           @relation("ReportedBy", fields: [reportedById], references: [id])
+  assignedToId    String?
+  assignedTo      User?          @relation("AssignedTo", fields: [assignedToId], references: [id])
+  targetId        String
+  target          Target         @relation(fields: [targetId], references: [id])
+  pentestId       String?
+  pentest         Pentest?       @relation(fields: [pentestId], references: [id])
+  companyId       String
+  company         Company        @relation(fields: [companyId], references: [id])
+  suggestedFix    String?
+  proofs          String[]       // Array of file URLs
+  firstFound      DateTime       @default(now())
+  resolvedDate    DateTime?
+  scanSource      String?
+  complianceTags  String[]       // Array of compliance tags
+  
+  notifications   Notification[]
+  tickets         Ticket[]
+  
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  pentestId   String
+  pentest     Pentest  @relation(fields: [pentestId], references: [id])
+  file        String   // URL to the report file
+  version     Int      @default(1)
+  summary     String?
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  createdAt   DateTime @default(now())
+}
+
+model Notification {
+  id             String           @id @default(cuid())
+  receiverId     String
+  receiver       User             @relation(fields: [receiverId], references: [id])
+  message        String
+  type           NotificationType
+  relatedFindingId String?
+  relatedFinding   Finding?       @relation(fields: [relatedFindingId], references: [id])
+  relatedPentestId String?
+  relatedPentest   Pentest?       @relation(fields: [relatedPentestId], references: [id])
+  isRead         Boolean          @default(false)
+  createdDate    DateTime         @default(now())
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String
+  targetType String
+  targetId   String
+  details    String?
+  timestamp  DateTime @default(now())
+}
+
+model Ticket {
+  id               String       @id @default(cuid())
+  title            String
+  category         String?
+  status           TicketStatus @default(OPEN)
+  messages         String[]     // Array of messages
+  createdById      String
+  createdBy        User         @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  assignedToId     String?
+  assignedTo       User?        @relation("TicketAssignedTo", fields: [assignedToId], references: [id])
+  relatedFindingId String?
+  relatedFinding   Finding?     @relation(fields: [relatedFindingId], references: [id])
+  relatedPentestId String?
+  relatedPentest   Pentest?     @relation(fields: [relatedPentestId], references: [id])
+  
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
